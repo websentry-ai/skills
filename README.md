@@ -73,40 +73,53 @@ build-skill/
 
 - [gstack](https://github.com/garrytan/gstack) — if installed, `/build` auto-detects the `/ship` skill and uses it for PR creation (Step 6) instead of the built-in `gh`-based fallback. gstack adds version bumping, CHANGELOG updates, bisectable commits, and its own pre-landing review.
 
-## Installation
+## Install — 30 seconds
 
-### Quick install
+Open Claude Code and paste this. Claude does the rest.
+
+> Install build-skill: run **`git clone --depth 1 https://github.com/websentry-ai/build-skill.git /tmp/build-skill && /tmp/build-skill/install.sh --force && rm -rf /tmp/build-skill`** — this installs the /build command and 5 specialized agents (principal-architect, principal-engineer, elite-pr-reviewer, code-simplifier, principal-engineer-review) into ~/.claude/. Then verify it worked by confirming /build is now available as a slash command.
+
+That's it. No manual terminal steps. Claude clones, installs, cleans up.
+
+### Alternative: manual install
+
+If you prefer doing it yourself:
 
 ```bash
 git clone https://github.com/websentry-ai/build-skill.git
 cd build-skill
-chmod +x install.sh
 ./install.sh
 ```
 
-This copies agents to `~/.claude/agents/` and the `/build` command to `~/.claude/commands/`.
-
-### Manual install
-
-Copy the files yourself:
+Or copy the files directly:
 
 ```bash
-# Agents
-cp agents/*.md ~/.claude/agents/
-
-# Commands
-cp commands/build.md ~/.claude/commands/
+git clone --depth 1 https://github.com/websentry-ai/build-skill.git /tmp/build-skill
+cp /tmp/build-skill/agents/*.md ~/.claude/agents/
+cp /tmp/build-skill/commands/build.md ~/.claude/commands/
+rm -rf /tmp/build-skill
 ```
 
-### Verify installation
+### Team install — share with your repo
 
-Open Claude Code in any git repo and type:
+Want teammates to get build-skill automatically? Add it to your project:
 
+```bash
+# From your project root
+mkdir -p .claude/commands .claude/agents
+cp ~/.claude/commands/build.md .claude/commands/
+cp ~/.claude/agents/principal-architect.md .claude/agents/
+cp ~/.claude/agents/principal-engineer.md .claude/agents/
+cp ~/.claude/agents/elite-pr-reviewer.md .claude/agents/
+cp ~/.claude/agents/code-simplifier.md .claude/agents/
+git add .claude/ && git commit -m "Add build-skill pipeline for AI-assisted development"
 ```
-/build
-```
 
-You should see the pipeline start with Step 0 (Plan).
+Now every teammate who opens Claude Code in this repo gets `/build` with zero setup.
+
+### Verify
+
+Open Claude Code in any git repo and type `/build`. You should see the pipeline start with Step 0 (Plan).
 
 ## Usage
 
