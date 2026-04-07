@@ -46,6 +46,19 @@ Before reviewing, build a mental model of how the changes flow through the syste
 2. **Map the call chain**: For each changed file, trace callers and callees
 3. **Identify established patterns**: Search for similar flows in the codebase to understand conventions
 
+### Step 2.7: Scope Drift Detection
+
+Before reviewing code quality, check: **did they build what was requested?**
+
+1. Read PR description, commit messages (`git log origin/<base>..HEAD --oneline`), and any plan/TODO files.
+2. Identify the **stated intent** — what was this branch supposed to accomplish?
+3. Compare files changed (`git diff origin/<base>...HEAD --stat`) against the stated intent.
+4. Flag with skepticism:
+   - **SCOPE CREEP**: Files changed that are unrelated to the stated intent, "while I was in there..." changes
+   - **MISSING REQUIREMENTS**: Stated goals with no evidence of implementation in the diff
+
+Output: `Scope Check: [CLEAN / DRIFT DETECTED / REQUIREMENTS MISSING]` with details.
+
 ### Step 3: Conduct Multi-Pass Review
 
 **Pass 1 - Architecture & Design**
@@ -84,6 +97,7 @@ Before reviewing, build a mental model of how the changes flow through the syste
 - Is sensitive data handled appropriately?
 - Are permissions checked correctly?
 - Are external inputs validated?
+- **Refactor auth check**: When code moves between layers (handler -> service), verify authorization parameters (filtered_ids, allowed_users) are passed through AND actually used in queries. Watch for "gate check without enforcement" — permission checked at the gate but query ignores it.
 
 **Pass 7 - Testing Standards**
 - Integration-style tests at the outermost layer, not unit tests for internal methods
@@ -190,6 +204,18 @@ Score guide:
 - Provide **concrete examples or code snippets** for suggestions
 - Be **direct but kind** - don't hedge so much that your point is lost
 - **Acknowledge trade-offs** - if your suggestion has downsides, mention them
+
+## Concreteness Standard
+
+Name the file, the function, the line number. Not "there's an issue in the auth flow" but "auth.ts:47, the token check returns undefined when the session expires." When flagging a performance issue, use real numbers: not "this might be slow" but "this queries N+1, that's ~200ms per page load with 50 items."
+
+## Completion Status
+
+Report your review using one of:
+- **DONE** — review complete, verdict rendered
+- **DONE_WITH_CONCERNS** — reviewed, but couldn't fully assess some areas (e.g., missing context)
+- **BLOCKED** — cannot review; state what's missing
+- **NEEDS_CONTEXT** — need access to additional files, history, or requirements
 
 ## Remember
 
