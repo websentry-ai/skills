@@ -1,11 +1,24 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 
 # build-skill installer
-# Copies agents, commands, and skills into your ~/.claude directory
+# Copies agents and commands into your ~/.claude directory
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_DIR="${CLAUDE_DIR:-$HOME/.claude}"
+FORCE=false
+
+# Parse flags
+for arg in "$@"; do
+    case "$arg" in
+        --force|-y) FORCE=true ;;
+        --help|-h)
+            echo "Usage: ./install.sh [--force|-y]"
+            echo "  --force, -y   Overwrite existing files without prompting"
+            exit 0
+            ;;
+    esac
+done
 
 echo "build-skill installer"
 echo "====================="
@@ -27,13 +40,18 @@ install_file() {
     local name="$3"
 
     if [[ -f "$dest" ]]; then
-        echo "  [EXISTS] $name — $dest already exists"
-        read -r -p "  Overwrite? (y/N): " answer
-        if [[ "$answer" =~ ^[Yy]$ ]]; then
+        if [[ "$FORCE" == "true" ]]; then
             cp "$src" "$dest"
             INSTALLED+=("$name (overwritten)")
         else
-            SKIPPED+=("$name")
+            echo "  [EXISTS] $name — $dest already exists"
+            read -r -p "  Overwrite? (y/N): " answer
+            if [[ "$answer" =~ ^[Yy]$ ]]; then
+                cp "$src" "$dest"
+                INSTALLED+=("$name (overwritten)")
+            else
+                SKIPPED+=("$name")
+            fi
         fi
     else
         cp "$src" "$dest"
@@ -44,6 +62,7 @@ install_file() {
 # Install agents
 echo "Installing agents..."
 for agent_file in "$SCRIPT_DIR"/agents/*.md; do
+    [[ -f "$agent_file" ]] || continue
     filename="$(basename "$agent_file")"
     agent_name="${filename%.md}"
     install_file "$agent_file" "$CLAUDE_DIR/agents/$filename" "agent: $agent_name"
@@ -54,6 +73,7 @@ echo ""
 # Install commands
 echo "Installing commands..."
 for cmd_file in "$SCRIPT_DIR"/commands/*.md; do
+    [[ -f "$cmd_file" ]] || continue
     filename="$(basename "$cmd_file")"
     cmd_name="${filename%.md}"
     install_file "$cmd_file" "$CLAUDE_DIR/commands/$filename" "command: /$cmd_name"

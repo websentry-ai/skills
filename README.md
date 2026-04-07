@@ -78,7 +78,7 @@ build-skill/
 ### Quick install
 
 ```bash
-git clone https://github.com/your-org/build-skill.git
+git clone https://github.com/websentry-ai/build-skill.git
 cd build-skill
 chmod +x install.sh
 ./install.sh
