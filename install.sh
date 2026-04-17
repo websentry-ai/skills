@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-# build-skill installer
+# skills installer
 # Copies agents and commands into your ~/.claude directory
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,8 +20,8 @@ for arg in "$@"; do
     esac
 done
 
-echo "build-skill installer"
-echo "====================="
+echo "skills installer"
+echo "================"
 echo ""
 echo "Installing to: $CLAUDE_DIR"
 echo ""
@@ -102,7 +102,9 @@ if [[ ${#SKIPPED[@]} -gt 0 ]]; then
 fi
 
 echo ""
-echo "Usage: In Claude Code, type /build to run the full pipeline."
+echo "Usage:"
+echo "  /council <spec>  — multi-lens review before you write code"
+echo "  /build <task>    — full plan/build/test/review/ship pipeline"
 echo ""
 echo "Optional: If you use gstack, /build will auto-detect the /ship skill"
 echo "and use it for PR creation. Otherwise, it falls back to a built-in"
