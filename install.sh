@@ -70,14 +70,17 @@ done
 
 echo ""
 
-# Install commands
+# Install commands (recursive — subdirectories namespace child commands, e.g.
+# commands/ux-laws-review/trust-and-honesty.md → /ux-laws-review:trust-and-honesty)
 echo "Installing commands..."
-for cmd_file in "$SCRIPT_DIR"/commands/*.md; do
-    [[ -f "$cmd_file" ]] || continue
-    filename="$(basename "$cmd_file")"
-    cmd_name="${filename%.md}"
-    install_file "$cmd_file" "$CLAUDE_DIR/commands/$filename" "command: /$cmd_name"
-done
+while IFS= read -r cmd_file; do
+    rel_path="${cmd_file#$SCRIPT_DIR/commands/}"
+    dest="$CLAUDE_DIR/commands/$rel_path"
+    mkdir -p "$(dirname "$dest")"
+    cmd_name="${rel_path%.md}"
+    cmd_name="${cmd_name//\//:}"
+    install_file "$cmd_file" "$dest" "command: /$cmd_name"
+done < <(find "$SCRIPT_DIR/commands" -type f -name '*.md')
 
 echo ""
 
