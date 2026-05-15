@@ -111,7 +111,48 @@ Do NOT proceed until all tests pass. Paste the test output as evidence.
 
 ---
 
-## Step 4: Elite PR Review (first pass)
+## Step 4: Parallel Review Fan-Out (first pass)
+
+Three reviewers run concurrently on the code changes: `elite-pr-reviewer`, `/security-review`, and `/ux-laws-review` (when applicable). All enabled reviewer Task calls **MUST be issued in a single assistant turn** with multiple tool calls — never sequence them. This matches the parallel-fan-out pattern used by `/council`.
+
+### Step 4.0 — Pre-flight checks
+
+1. **Detect base branch** (canonical detection — Step 6 Option B references this block). Sets `$BASE_BRANCH`:
+
+```bash
+BASE_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@') \
+  || BASE_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null) \
+  || BASE_BRANCH=$(git remote show origin 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}') \
+  || BASE_BRANCH="main"
+```
+
+2. **Capture the changed-file list:**
+
+```bash
+git diff --name-only "origin/$BASE_BRANCH"...HEAD
+```
+
+3. **Empty-diff guard:** If the changed-file list is empty, abort Step 4 with a clear message — there is nothing to review. Either the working tree was clean when `/build` was invoked, or BASE_BRANCH detection is wrong.
+
+4. **Compute `UX_REVIEW_ENABLED`:**
+   - Set `UX_REVIEW_ENABLED=false` **iff every** changed file matches one of:
+     - Path starts with one of: `server/`, `api/`, `backend/`, `infra/`, `terraform/`, `migrations/`, `.github/`, `scripts/`, `docs/`
+     - File extension is one of: `.sql`, `.tf`, `.yaml`, `.yml`, `.toml`, `.md`
+   - Otherwise set `UX_REVIEW_ENABLED=true` — any frontend/UI file forces the audit on.
+   - **When in doubt, set to `true`.** The conservative call is to let `/ux-laws-review` itself decide via its own auto-skip semantics.
+
+5. **Verify reviewer availability:**
+   - `elite-pr-reviewer` agent **must be available**. If missing, **hard error and stop** — this is the historical baseline reviewer and its absence indicates a broken environment.
+   - `/security-review` skill **must be available**. If it is missing, **hard error and stop** — security review cannot be infra-flaky.
+   - `/ux-laws-review` skill availability is checked only if `UX_REVIEW_ENABLED=true`. If missing or it errors during invocation, treat per the failure-mode rule in 4.1.c (WARN, do not block).
+
+   Hard error means: surface the missing-skill name to the user, halt the pipeline at Step 4, and do not advance to Step 5 or Step 6. Resume only after the user confirms the skill is available.
+
+6. **Unconditional reviewers:** `elite-pr-reviewer` and `/security-review` run on every PR regardless of diff shape.
+
+### Step 4.1 — Fan out reviewers in parallel
+
+#### 4.1.a — `elite-pr-reviewer`
 
 Launch `elite-pr-reviewer` agent on the code changes:
 
@@ -130,27 +171,103 @@ Output a structured list of findings with severity (CRITICAL / WARNING / INFO).
 For each finding: file:line, problem, and recommended fix.
 ```
 
-Capture the review output for Step 5.
+**Output contract:** findings with severity `CRITICAL / WARNING / INFO`, each with file:line, problem, and recommended fix.
+
+#### 4.1.b — `/security-review`
+
+Invoke Anthropic's built-in `/security-review` skill, diff-scoped to `git diff origin/$BASE_BRANCH...HEAD`. Complementary to `elite-pr-reviewer`, not redundant.
+
+```
+Review the diff at git diff origin/<base>...HEAD as a focused security review.
+
+Surface threats with severity (CRITICAL / HIGH / MEDIUM / LOW).
+For each finding: file:line, threat description, recommended remediation.
+```
+
+**Output contract:** findings with severity `CRITICAL / HIGH / MEDIUM / LOW`, each with file:line, threat description, and recommended remediation.
+
+#### 4.1.c — `/ux-laws-review` (conditional)
+
+**Only invoke if `UX_REVIEW_ENABLED=true` from Step 4.0.** Pass the PR diff context and the preview URL when available. `/ux-laws-review`'s own auto-skip semantics remain in force as a defensive second layer.
+
+```
+Run a UX Laws audit on the changes in this PR.
+
+Inputs:
+- Diff: git diff origin/<base>...HEAD
+- Preview URL (if available): <url>
+
+Output a lens-aware scorecard, the detected surface classification, and a verdict (PASS / WARN / FAIL).
+```
+
+**Output contract:** lens-aware scorecard, surface classification, verdict `PASS / WARN / FAIL`.
+
+**Error handling:** if `/ux-laws-review` errors or fails to produce a verdict, capture as a WARN with the stable greppable marker `[ux-laws-review:UNAVAILABLE]: <reason>`. **Do not block merge.**
+
+### Step 4.2 — Consolidate findings
+
+Produce three sibling sections feeding Step 5. Preserve each reviewer's native severity vocabulary — do not merge or remap severities. Severity vocabularies intentionally differ across reviewers — do not remap (`CRITICAL/WARNING/INFO` for elite-pr-reviewer, `CRITICAL/HIGH/MEDIUM/LOW` for `/security-review`, `PASS/WARN/FAIL` for `/ux-laws-review`). This is by design — each reviewer's gating rules are tuned to its own vocabulary.
+
+**Output shape:**
+
+```
+### Elite PR Review findings
+- CRITICAL / WARNING / INFO findings, each with file:line + recommended fix
+
+### Security Review findings
+- CRITICAL / HIGH / MEDIUM / LOW findings, each with file:line + remediation
+
+### UX Laws Review findings
+- (when UX_REVIEW_ENABLED=false) "skipped — backend-only diff"
+- (on reviewer failure) "[ux-laws-review:UNAVAILABLE]: <reason>"
+- (otherwise) lens scorecard + WARN/FAIL items with surface classification + verdict
+```
+
+Step 5 iterates over these three sibling sections.
 
 ---
 
 ## Step 5: Address Review Findings
 
-For each finding from Step 4:
+Walk each of the three sibling sections from Step 4.2 in turn. Each reviewer has its own gating semantics.
 
-1. **CRITICAL findings**: Must be fixed. Launch `principal-engineer` agent to fix each one.
-2. **WARNING findings**: Fix unless there's a clear reason not to. Use judgment.
-3. **INFO findings**: Fix if trivial, skip if not.
+### Elite PR Review findings
 
-After fixes are applied:
+1. **CRITICAL**: Must be fixed. Launch `principal-engineer` agent to fix each one.
+2. **WARNING**: Fix unless there's a clear reason not to. Use judgment.
+3. **INFO**: Fix if trivial, skip if not.
 
-- Launch `principal-architect` agent to validate the fixes are architecturally sound:
+### Security Review findings
+
+1. **CRITICAL**: **Blocks merge — no override.** Launch `principal-engineer` agent to fix before proceeding.
+2. **HIGH**: **Blocks merge** unless overridden by an authorized approver per the SOC 2 production-merge approver list. Do not hardcode approver identities here — defer to the policy list.
+3. **MEDIUM**: Fix unless there's a clear reason not to.
+4. **LOW**: Fix if trivial, skip if not.
+
+### UX Laws Review findings
+
+1. **FAIL on a critical-flow surface** (as defined by `/ux-laws-review`'s surface classification — see `commands/ux-laws-review.md`): **Blocks merge.** Launch `principal-engineer` agent to fix.
+2. **WARN**: Post to the PR, **non-blocking**. Address if cheap, defer otherwise.
+3. **PASS**: Silent.
+4. **`[ux-laws-review:UNAVAILABLE]` marker**: Log a WARN and continue. Do not block.
+
+### Blocker-council escalation
+
+If reviewer and engineer reach an impasse on a finding's disposition: invoke `/eng-blocker-council` for security/correctness/test findings, or `/ux-blocker-council` for UX Laws FAIL disputes. (These council skills are forthcoming follow-up PRs.) Until those councils ship, escalate to the user with the disputed finding, the reviewer's position, and the engineer's counter-position; wait for adjudication.
+
+### Architectural validation of fixes
+
+After all fixes across the three sections are applied:
+
+- Launch `principal-architect` agent to validate the consolidated fix set is architecturally sound:
 
 ```
 ## Task: Validate review fixes
 
-Review the following fixes applied to address PR review findings:
-{list of findings and what was changed}
+Review the following fixes applied to address PR review findings across all three reviewers
+(elite-pr-reviewer, /security-review, /ux-laws-review):
+
+{list of findings and what was changed, grouped by reviewer}
 
 Verify:
 - Fixes don't introduce new issues or break the architecture
@@ -182,14 +299,7 @@ Check if the `/ship` skill is available. If so, invoke it. It handles:
 
 If `/ship` is not available, use this built-in workflow:
 
-1. **Detect base branch:**
-```bash
-BASE_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@') \
-  || BASE_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null) \
-  || BASE_BRANCH=$(git remote show origin 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}') \
-  || BASE_BRANCH="main"
-echo "Base branch: $BASE_BRANCH"
-```
+1. **Detect base branch:** If `$BASE_BRANCH` is not already set from Step 4.0 (e.g., entering Step 6 directly in iteration mode), detect it using the logic in Step 4.0 step 1.
 
 2. **Merge base branch:**
 ```bash
@@ -312,7 +422,7 @@ At the end, output:
   - [x] Step 1: Code (principal-engineer)
   - [x] Step 2: Simplify (code-simplifier)
   - [x] Step 3: Test & verify (principal-engineer)
-  - [x] Step 4: Elite PR review (first pass)
+  - [x] Step 4: Parallel review fan-out (first pass)
   - [x] Step 5: Fix findings + validate (principal-engineer + principal-architect)
   - [x] Step 6: Raise PR
   - [x] Step 7: Elite PR review (second pass)
@@ -324,7 +434,9 @@ At the end, output:
 ## Important Rules
 
 - **Never skip tests.** Every step that changes code must re-run tests.
-- **Never skip reviews.** Both elite-pr-review passes are mandatory.
+- **Never skip reviews.** Step 4's parallel review fan-out (`elite-pr-reviewer` + `/security-review` + `/ux-laws-review` when applicable) and the Step 7 second-pass review are mandatory.
+- **Security-review CRITICAL is never overridable.** Security-review HIGH is overridable only by an authorized approver per the SOC 2 production-merge list.
+- **Reviewer infrastructure failures** (e.g., `/ux-laws-review` unavailable) log a WARN; they never block merge.
 - **Tests must be at the outermost layer** — API/job level, not helper unit tests.
 - **Wait for user approval** on the plan (Step 0) before coding.
 - **5-minute gap** between Step 7 and Step 8 for bot reviews to land.
